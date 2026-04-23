@@ -18,6 +18,37 @@ export { alignRows } from "./row-matcher";
 let _debugRowCount = 0;
 
 /**
+ * Build an alignment-only row view where formula cells use formula text as comparable value.
+ * This avoids row matching drift when one file has cached formula results and the other does not.
+ */
+function buildRowsForAlignment(rows: SheetData["rows"]): SheetData["rows"] {
+  return rows.map((row) =>
+    row.map((cell) => {
+      if (!cell) {
+        return cell;
+      }
+
+      if (!cell?.formula) {
+        // Normalize line endings for alignment so LF/CRLF variants map to the same row.
+        if (typeof cell.value === "string" && cell.value.includes("\r")) {
+          return {
+            ...cell,
+            value: cell.value.replace(/\r\n?/g, "\n"),
+          };
+        }
+        return cell;
+      }
+      const formulaValue = `=${cell.formula.trim()}`;
+      return {
+        ...cell,
+        value: formulaValue,
+        type: "string",
+      };
+    }),
+  );
+}
+
+/**
  * Compare two rows cell by cell
  */
 async function compareRows(
@@ -183,8 +214,13 @@ export async function computeSpreadsheetDiff(
 
   console.log("[DEBUG] computeSpreadsheetDiff started with options.ignoredColumns:", options.ignoredColumns);
 
-  // Step 1: Align rows based on matching strategy (async to allow UI responsiveness)
-  const alignments = await alignRows(originalData.rows, modifiedData.rows, options);
+  // Step 1: Align rows based on matching strategy (async to allow UI responsiveness).
+  // We align using formula text when formulas exist to avoid false add/remove pairs.
+  const alignments = await alignRows(
+    buildRowsForAlignment(originalData.rows),
+    buildRowsForAlignment(modifiedData.rows),
+    options,
+  );
 
   // Step 2: Compare each aligned row pair (in parallel for better performance)
   const rowPromises = alignments.map(async (alignment) => {

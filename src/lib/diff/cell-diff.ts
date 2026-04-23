@@ -24,6 +24,8 @@ function normalizeValue(value: CellValue, options: ComparisonOptions): string {
   if (value === null || value === undefined) return "";
 
   let str = String(value);
+  // Normalize platform line endings so visually identical multiline text does not diff as changed.
+  str = str.replace(/\r\n?/g, "\n");
 
   if (options.ignoreWhitespace) {
     str = str.replace(/\s+/g, " ").trim();
@@ -37,6 +39,24 @@ function normalizeValue(value: CellValue, options: ComparisonOptions): string {
 }
 
 /**
+ * Normalize formula text so semantically identical formulas compare equal,
+ * even when spreadsheet engines serialize with minor formatting differences.
+ */
+function normalizeFormula(formula: string, options: ComparisonOptions): string {
+  let normalized = formula.trim();
+  if (normalized.startsWith("=")) {
+    normalized = normalized.slice(1);
+  }
+  if (options.ignoreWhitespace) {
+    normalized = normalized.replace(/\s+/g, " ").trim();
+  }
+  if (options.ignoreCase) {
+    normalized = normalized.toLowerCase();
+  }
+  return normalized;
+}
+
+/**
  * Compare two cell values and return if they are equal
  */
 export function areCellsEqual(
@@ -44,6 +64,27 @@ export function areCellsEqual(
   modified: Cell | null,
   options: ComparisonOptions,
 ): boolean {
+  const origFormula = original?.formula ?? "";
+  const modFormula = modified?.formula ?? "";
+  const hasOrigFormula = origFormula.trim().length > 0;
+  const hasModFormula = modFormula.trim().length > 0;
+
+  // Prefer formula equality when both sides are formulas to avoid false added/removed signals
+  // caused by stale cached values in spreadsheet files.
+  if (hasOrigFormula && hasModFormula) {
+    const formulasEqual = normalizeFormula(origFormula, options) === normalizeFormula(modFormula, options);
+    if (formulasEqual) {
+      return true;
+    }
+    if (options.compareFormulas) {
+      return false;
+    }
+  }
+
+  if (options.compareFormulas && hasOrigFormula !== hasModFormula) {
+    return false;
+  }
+
   const origValue = original?.value ?? null;
   const modValue = modified?.value ?? null;
 
@@ -55,15 +96,6 @@ export function areCellsEqual(
   // One is empty, other is not
   if ((origValue === null || origValue === "") !== (modValue === null || modValue === "")) {
     return false;
-  }
-
-  // Compare formulas if option enabled
-  if (options.compareFormulas) {
-    const origFormula = original?.formula || "";
-    const modFormula = modified?.formula || "";
-    if (origFormula !== modFormula) {
-      return false;
-    }
   }
 
   // Normalize and compare
@@ -97,8 +129,12 @@ export function getCellChangeType(
   modified: Cell | null,
   options: ComparisonOptions,
 ): CellChangeType {
-  const origEmpty = !original || original.value === null || original.value === "";
-  const modEmpty = !modified || modified.value === null || modified.value === "";
+  const origHasFormula = Boolean(original?.formula?.trim());
+  const modHasFormula = Boolean(modified?.formula?.trim());
+  // Formula-only cells should not be considered empty, otherwise equal formulas can be misclassified
+  // as added/removed when one side lacks a cached value.
+  const origEmpty = !original || (!origHasFormula && (original.value === null || original.value === ""));
+  const modEmpty = !modified || (!modHasFormula && (modified.value === null || modified.value === ""));
 
   if (origEmpty && modEmpty) return "unchanged";
   if (origEmpty && !modEmpty) return "added";

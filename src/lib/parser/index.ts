@@ -77,7 +77,10 @@ function parseWorksheet(
       const cell = worksheet[cellAddress];
 
       if (cell) {
-        row.push(createCell(cell.v, cell.f));
+        // `sheetStubs: true` yields stub cells (`t: "z"`) for blanks and formula-only cells.
+        // For stubs we keep value as null and rely on `formula` to preserve formula-only semantics.
+        const normalizedValue = cell.t === "z" ? null : cell.v;
+        row.push(createCell(normalizedValue, cell.f));
       } else {
         row.push(createCell(null));
       }
@@ -114,6 +117,8 @@ export async function parseSpreadsheet(file: File): Promise<ParsedSpreadsheet> {
           cellDates: true,
           cellFormula: true,
           cellStyles: false,
+          // Preserve formula-only cells that have no cached value in the workbook.
+          sheetStubs: true,
         });
 
         const sheets: SheetInfo[] = workbook.SheetNames.map((name) => {
