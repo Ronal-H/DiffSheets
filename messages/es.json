@@ -55,7 +55,10 @@
     "findDifference": "Encontrar Diferencias",
     "processing": "Procesando...",
     "fileInfo": "{rows} filas, {cols} columnas",
-    "clear": "Limpiar archivo"
+    "clear": "Limpiar archivo",
+    "errors": {
+      "tooManyFiles": "Sube como máximo 2 archivos a la vez."
+    }
   },
   "diff": {
     "title": "Resultados de la Comparación",
@@ -76,6 +79,32 @@
       "hideUnchangedCols": "Ocultar columnas sin cambios",
       "ignoreWhitespace": "Ignorar espacios en blanco",
       "ignoreCase": "Ignorar mayúsculas/minúsculas"
+    },
+    "activeSheet": "Hoja: {name}",
+    "displayLabel": "Visualización",
+    "comparisonLabel": "Comparación",
+    "collapsed": {
+      "expand": "Mostrar {count} filas sin cambios",
+      "collapse": "Ocultar {count} filas sin cambios"
+    },
+    "sheetSidebar": {
+      "title": "Hojas",
+      "sheetCount": "{count} hoja(s)",
+      "modifiedCount": "{count} modificadas",
+      "unchangedCount": "{count} sin cambios",
+      "addedCount": "{count} agregadas",
+      "removedCount": "{count} eliminadas",
+      "deltaRows": "{count} cambios de fila",
+      "status": {
+        "unchanged": "Sin cambios",
+        "modified": "Modificada",
+        "added": "Agregada",
+        "removed": "Eliminada"
+      }
+    },
+    "actions": {
+      "replaceOriginal": "Reemplazar A",
+      "replaceModified": "Reemplazar B"
     },
     "noChanges": "No se encontraron diferencias",
     "emptyState": "Sube dos archivos para comparar",

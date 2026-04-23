@@ -44,6 +44,49 @@ export interface DiffResult {
   summary: DiffSummary;
 }
 
+export type SheetChangeType = "unchanged" | "modified" | "added" | "removed";
+
+export interface SheetDiffResult {
+  /**
+   * Stable sheet identifier for UI state and list keys.
+   * Uses name + index to avoid collisions when names are duplicated externally.
+   */
+  sheetId: string;
+  /** Display name shown in sidebar navigation. */
+  sheetName: string;
+  /** Original workbook sheet name; null when the sheet only exists in modified file. */
+  originalSheetName: string | null;
+  /** Modified workbook sheet name; null when the sheet only exists in original file. */
+  modifiedSheetName: string | null;
+  /** Sheet-level change classification used by sidebar badges. */
+  changeType: SheetChangeType;
+  /** Sheet diff payload rendered by the grid view. */
+  diffResult: DiffResult;
+  /** Per-sheet row/cell summary displayed in navigation and header. */
+  summary: DiffSummary;
+}
+
+export interface WorkbookDiffSummary extends DiffSummary {
+  totalSheets: number;
+  comparedSheets: number;
+  addedSheets: number;
+  removedSheets: number;
+  modifiedSheets: number;
+  unchangedSheets: number;
+}
+
+export interface WorkbookDiffResult {
+  /** Ordered sheet diff results used by sidebar and current-sheet selection. */
+  sheets: SheetDiffResult[];
+  /** Aggregated workbook-level counts for metrics and quick status. */
+  summary: WorkbookDiffSummary;
+  /**
+   * Name to sheetId map for fast lookup.
+   * Value is an array to support potential duplicate names from external normalization.
+   */
+  sheetNameMap: Record<string, string[]>;
+}
+
 export type MatchingStrategy = "position" | "key-column" | "lcs";
 
 export interface ComparisonOptions {

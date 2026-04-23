@@ -17,6 +17,7 @@ export function ComparisonUploader() {
   const {
     originalFile,
     modifiedFile,
+    currentSheetName,
     isComparing,
     options,
     setOriginalFile,
@@ -29,7 +30,8 @@ export function ComparisonUploader() {
     setModifiedSheet,
     setModifiedLoading,
     setModifiedError,
-    setDiffResult,
+    setWorkbookDiffResult,
+    setCurrentSheetName,
     setIsComparing,
     setComparisonError,
     setOptions,
@@ -37,56 +39,78 @@ export function ComparisonUploader() {
     resetModified,
   } = useSpreadsheetStore();
 
-  const handleOriginalFileSelect = useCallback(
-    async (file: File) => {
-      setOriginalFile(file);
-      setOriginalLoading(true);
-      setOriginalError(null);
+  const parseAndSetFile = useCallback(
+    async (side: "original" | "modified", file: File) => {
+      const setFile = side === "original" ? setOriginalFile : setModifiedFile;
+      const setLoading = side === "original" ? setOriginalLoading : setModifiedLoading;
+      const setError = side === "original" ? setOriginalError : setModifiedError;
+      const setParsed = side === "original" ? setOriginalParsed : setModifiedParsed;
+
+      setFile(file);
+      setLoading(true);
+      setError(null);
 
       try {
         const parsed = await parseSpreadsheet(file);
-        setOriginalParsed(parsed);
+        setParsed(parsed);
+        return parsed;
       } catch (error) {
-        setOriginalError(error instanceof Error ? error.message : "Failed to parse file");
+        setError(error instanceof Error ? error.message : "Failed to parse file");
+        return null;
       } finally {
-        setOriginalLoading(false);
+        setLoading(false);
       }
     },
-    [setOriginalFile, setOriginalParsed, setOriginalLoading, setOriginalError],
+    [
+      setOriginalFile,
+      setOriginalLoading,
+      setOriginalError,
+      setOriginalParsed,
+      setModifiedFile,
+      setModifiedLoading,
+      setModifiedError,
+      setModifiedParsed,
+    ],
+  );
+
+  const handleOriginalFileSelect = useCallback(
+    async (file: File) => {
+      await parseAndSetFile("original", file);
+    },
+    [parseAndSetFile],
   );
 
   const handleModifiedFileSelect = useCallback(
     async (file: File) => {
-      setModifiedFile(file);
-      setModifiedLoading(true);
-      setModifiedError(null);
-
-      try {
-        const parsed = await parseSpreadsheet(file);
-        setModifiedParsed(parsed);
-      } catch (error) {
-        setModifiedError(error instanceof Error ? error.message : "Failed to parse file");
-      } finally {
-        setModifiedLoading(false);
-      }
+      await parseAndSetFile("modified", file);
     },
-    [setModifiedFile, setModifiedParsed, setModifiedLoading, setModifiedError],
+    [parseAndSetFile],
+  );
+
+  const handleFilePairSelect = useCallback(
+    async (files: [File, File]) => {
+      const [originalCandidate, modifiedCandidate] = files;
+      setComparisonError(null);
+      await Promise.all([
+        parseAndSetFile("original", originalCandidate),
+        parseAndSetFile("modified", modifiedCandidate),
+      ]);
+    },
+    [parseAndSetFile, setComparisonError],
   );
 
   const canCompare =
     originalFile.parsed &&
     modifiedFile.parsed &&
-    originalFile.selectedSheet &&
-    modifiedFile.selectedSheet &&
     !originalFile.isLoading &&
     !modifiedFile.isLoading;
 
   const handleCompare = useCallback(async () => {
-    const origData = originalFile.parsed?.data.get(originalFile.selectedSheet);
-    const modData = modifiedFile.parsed?.data.get(modifiedFile.selectedSheet);
+    const originalParsed = originalFile.parsed;
+    const modifiedParsed = modifiedFile.parsed;
 
-    if (!origData || !modData) {
-      setComparisonError("Missing sheet data");
+    if (!originalParsed || !modifiedParsed) {
+      setComparisonError("Missing workbook data");
       return;
     }
 
@@ -94,10 +118,26 @@ export function ComparisonUploader() {
     setComparisonError(null);
 
     try {
-      // Lazy-load diff module only when user clicks Compare (saves ~20KB from initial bundle)
-      const { computeSpreadsheetDiff } = await import("@/lib/diff");
-      const result = await computeSpreadsheetDiff(origData, modData, options);
-      setDiffResult(result);
+      // Lazy-load workbook diff module only when user clicks Compare to keep initial bundle small.
+      const { computeWorkbookDiff } = await import("@/lib/diff/workbook-diff");
+      const workbookResult = await computeWorkbookDiff(originalParsed, modifiedParsed, options);
+
+      if (workbookResult.sheets.length === 0) {
+        setWorkbookDiffResult(null);
+        setCurrentSheetName(null);
+        setComparisonError("No sheets available for comparison");
+        return;
+      }
+
+      const hasCurrentSheet = workbookResult.sheets.some(
+        (sheet) => sheet.sheetName === currentSheetName,
+      );
+      const nextSheetName = hasCurrentSheet
+        ? currentSheetName
+        : (workbookResult.sheets[0]?.sheetName ?? null);
+
+      setWorkbookDiffResult(workbookResult);
+      setCurrentSheetName(nextSheetName);
     } catch (error) {
       setComparisonError(error instanceof Error ? error.message : "Comparison failed");
     } finally {
@@ -105,11 +145,11 @@ export function ComparisonUploader() {
     }
   }, [
     originalFile.parsed,
-    originalFile.selectedSheet,
     modifiedFile.parsed,
-    modifiedFile.selectedSheet,
+    currentSheetName,
     options,
-    setDiffResult,
+    setWorkbookDiffResult,
+    setCurrentSheetName,
     setIsComparing,
     setComparisonError,
   ]);
@@ -137,6 +177,8 @@ export function ComparisonUploader() {
             isLoading={originalFile.isLoading}
             error={originalFile.error}
             onFileSelect={handleOriginalFileSelect}
+            onFilePairSelect={handleFilePairSelect}
+            onUploadError={setComparisonError}
             onFileClear={resetOriginal}
           />
 
@@ -167,6 +209,8 @@ export function ComparisonUploader() {
             isLoading={modifiedFile.isLoading}
             error={modifiedFile.error}
             onFileSelect={handleModifiedFileSelect}
+            onFilePairSelect={handleFilePairSelect}
+            onUploadError={setComparisonError}
             onFileClear={resetModified}
           />
 

@@ -1,9 +1,11 @@
 export { CellInspector } from "./cell-inspector";
 export { ChangeNavigation } from "./change-navigation";
+export { CollapsedUnchangedBlock } from "./collapsed-unchanged-block";
 export { DiffCell } from "./diff-cell";
 export { DiffGrid } from "./diff-grid";
 export { DiffRow } from "./diff-row";
 export { DiffSummary } from "./diff-summary";
 export { DiffView } from "./diff-view";
+export { SheetDiffSidebar } from "./sheet-diff-sidebar";
 export { SideBySideGrid } from "./side-by-side-grid";
 export { ViewModeSelector } from "./view-mode-selector";

@@ -1,15 +1,26 @@
 "use client";
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
-import type { DiffCell, DiffResult, DiffRow } from "@/types";
+import type {
+  CollapsedUnchangedRenderItem,
+  DiffRenderItem,
+  DiffRowRenderItem,
+} from "@/lib/diff/unchanged-blocks";
+import type { DiffCell, DiffRow } from "@/types";
+import { CollapsedUnchangedBlock } from "./collapsed-unchanged-block";
 
 interface SideBySideGridProps {
-  diffResult: DiffResult;
-  visibleRows: DiffRow[];
+  renderItems: DiffRenderItem[];
   visibleColumns: number[];
   currentChangeIndex: number;
+  sheetKey: string | null;
+  originalLabel: string;
+  modifiedLabel: string;
+  expandedBlockIds: ReadonlySet<string>;
+  onToggleCollapsedBlock: (blockId: string) => void;
   onCellClick?: (cell: DiffCell, rowIndex: number, colIndex: number) => void;
   className?: string;
 }
@@ -57,20 +68,30 @@ function calculateColumnWidths(rows: DiffRow[], columns: number[]): Map<number, 
 }
 
 export function SideBySideGrid({
-  diffResult,
-  visibleRows,
+  renderItems,
   visibleColumns,
   currentChangeIndex,
+  sheetKey,
+  originalLabel,
+  modifiedLabel,
+  expandedBlockIds,
+  onToggleCollapsedBlock,
   onCellClick,
   className,
 }: SideBySideGridProps) {
+  const t = useTranslations("diff");
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
-  const [isScrolling, setIsScrolling] = useState(false);
+  const syncingSourceRef = useRef<"left" | "right" | null>(null);
+
+  const rowItems = useMemo(
+    () => renderItems.filter((item): item is DiffRowRenderItem => item.type === "row"),
+    [renderItems],
+  );
 
   const columnWidths = useMemo(
-    () => calculateColumnWidths(visibleRows, visibleColumns),
-    [visibleRows, visibleColumns],
+    () => calculateColumnWidths(rowItems.map((item) => item.row), visibleColumns),
+    [rowItems, visibleColumns],
   );
 
   const totalWidth = useMemo(() => {
@@ -81,55 +102,83 @@ export function SideBySideGrid({
     return width;
   }, [visibleColumns, columnWidths]);
 
-  // Find changed rows for navigation
-  const changedRowIndices = useMemo(() => {
-    return visibleRows
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.changeType !== "unchanged")
-      .map(({ index }) => index);
-  }, [visibleRows]);
+  // Keep navigation aligned to rendered row index so collapsed blocks are skipped naturally.
+  const changedRenderIndices = useMemo(() => {
+    const indices: number[] = [];
+    for (let renderIndex = 0; renderIndex < renderItems.length; renderIndex++) {
+      const item = renderItems[renderIndex];
+      if (item.type === "row" && item.row.changeType !== "unchanged") {
+        indices.push(renderIndex);
+      }
+    }
+    return indices;
+  }, [renderItems]);
 
   const rowVirtualizer = useVirtualizer({
-    count: visibleRows.length,
+    count: renderItems.length,
     getScrollElement: () => leftRef.current,
-    estimateSize: () => 36,
+    estimateSize: (index) => (renderItems[index]?.type === "collapsed" ? 44 : 36),
     overscan: 10,
   });
 
-  // Synchronized scrolling
-  const handleScroll = useCallback(
-    (source: "left" | "right") => {
-      if (isScrolling) return;
-      setIsScrolling(true);
-
-      const sourceEl = source === "left" ? leftRef.current : rightRef.current;
-      const targetEl = source === "left" ? rightRef.current : leftRef.current;
-
-      if (sourceEl && targetEl) {
-        targetEl.scrollTop = sourceEl.scrollTop;
-        targetEl.scrollLeft = sourceEl.scrollLeft;
-      }
-
-      requestAnimationFrame(() => setIsScrolling(false));
-    },
-    [isScrolling],
-  );
-
-  // Scroll to current change
   useEffect(() => {
-    if (currentChangeIndex >= 0 && currentChangeIndex < changedRowIndices.length) {
-      const rowIndex = changedRowIndices[currentChangeIndex];
-      rowVirtualizer.scrollToIndex(rowIndex, { align: "center", behavior: "smooth" });
+    rowVirtualizer.measure();
+  }, [renderItems, rowVirtualizer]);
+
+  const handleScroll = useCallback((source: "left" | "right") => {
+    if (syncingSourceRef.current && syncingSourceRef.current !== source) {
+      return;
     }
-  }, [currentChangeIndex, changedRowIndices, rowVirtualizer]);
+
+    const sourceEl = source === "left" ? leftRef.current : rightRef.current;
+    const targetEl = source === "left" ? rightRef.current : leftRef.current;
+    if (!sourceEl || !targetEl) {
+      return;
+    }
+
+    syncingSourceRef.current = source;
+    if (targetEl.scrollTop !== sourceEl.scrollTop) {
+      targetEl.scrollTop = sourceEl.scrollTop;
+    }
+    if (targetEl.scrollLeft !== sourceEl.scrollLeft) {
+      targetEl.scrollLeft = sourceEl.scrollLeft;
+    }
+
+    requestAnimationFrame(() => {
+      if (syncingSourceRef.current === source) {
+        syncingSourceRef.current = null;
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (currentChangeIndex >= 0 && currentChangeIndex < changedRenderIndices.length) {
+      const targetRenderIndex = changedRenderIndices[currentChangeIndex];
+      rowVirtualizer.scrollToIndex(targetRenderIndex, { align: "center", behavior: "smooth" });
+    }
+  }, [currentChangeIndex, changedRenderIndices, rowVirtualizer]);
+
+  // Reset both panes only when sheet changes; avoid resetting on normal rerenders.
+  useEffect(() => {
+    rowVirtualizer.scrollToOffset(0);
+    const left = leftRef.current;
+    const right = rightRef.current;
+    if (left) {
+      left.scrollTop = 0;
+      left.scrollLeft = 0;
+    }
+    if (right) {
+      right.scrollTop = 0;
+      right.scrollLeft = 0;
+    }
+  }, [sheetKey]);
 
   const renderCell = (
-    row: DiffRow,
+    rowItem: DiffRowRenderItem,
     colIndex: number,
     side: "original" | "modified",
-    rowIdx: number,
   ) => {
-    const cell = row.cells[colIndex];
+    const cell = rowItem.row.cells[colIndex];
     const width = columnWidths.get(colIndex) ?? 80;
     const value = side === "original" ? cell?.original?.value : cell?.modified?.value;
     const displayValue = value !== null && value !== undefined ? String(value) : "";
@@ -147,14 +196,14 @@ export function SideBySideGrid({
       <td
         key={colIndex}
         className={cn(
-          "border-r px-2 py-1.5 truncate transition-colors cursor-pointer",
+          "cursor-pointer truncate border-r px-2 py-1.5 transition-colors",
           "hover:bg-muted/50",
           isChanged && side === "original" && "bg-red-100/80 dark:bg-red-900/30",
           isChanged && side === "modified" && "bg-green-100/80 dark:bg-green-900/30",
           isEmpty && "bg-muted/30",
         )}
         style={{ width, minWidth: width, maxWidth: width }}
-        onClick={() => cell && onCellClick?.(cell, rowIdx, colIndex)}
+        onClick={() => cell && onCellClick?.(cell, rowItem.sourceIndex, colIndex)}
         title={displayValue}
       >
         <span
@@ -170,11 +219,38 @@ export function SideBySideGrid({
     );
   };
 
+  const renderCollapsedRow = (
+    item: CollapsedUnchangedRenderItem,
+    virtualRow: ReturnType<typeof rowVirtualizer.getVirtualItems>[number],
+    side: "original" | "modified",
+  ) => (
+    <tr
+      key={`${virtualRow.key}-${side}`}
+      className="border-b"
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: virtualRow.size,
+        transform: `translateY(${virtualRow.start}px)`,
+      }}
+    >
+      <td colSpan={visibleColumns.length + 1} className="p-0">
+        <CollapsedUnchangedBlock
+          hiddenRowCount={item.hiddenRowCount}
+          isExpanded={expandedBlockIds.has(item.id)}
+          onToggle={() => onToggleCollapsedBlock(item.id)}
+        />
+      </td>
+    </tr>
+  );
+
   const renderTable = (
     side: "original" | "modified",
     ref: React.RefObject<HTMLDivElement | null>,
   ) => (
-    <div className="flex-1 min-w-0">
+    <div className="min-w-0 flex-1">
       <div
         className={cn(
           "sticky top-0 z-20 flex items-center justify-center gap-2 border-b py-2 font-semibold",
@@ -191,15 +267,17 @@ export function SideBySideGrid({
         >
           {side === "original" ? "A" : "B"}
         </span>
-        {side === "original" ? "Original" : "Modified"}
+        <span className="max-w-[220px] truncate" title={side === "original" ? originalLabel : modifiedLabel}>
+          {side === "original" ? originalLabel : modifiedLabel}
+        </span>
       </div>
       <div
         ref={ref}
-        className="h-[calc(100vh-220px)] overflow-auto"
+        className="h-[calc(100vh-180px)] overflow-auto"
         onScroll={() => handleScroll(side === "original" ? "left" : "right")}
       >
         <table
-          className="border-collapse text-sm w-full"
+          className="w-full border-collapse text-sm"
           style={{ tableLayout: "fixed", minWidth: totalWidth }}
         >
           <thead className="sticky top-0 z-10">
@@ -228,18 +306,27 @@ export function SideBySideGrid({
             }}
           >
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const row = visibleRows[virtualRow.index];
-              const rowNumber = side === "original" ? row.originalIndex : row.modifiedIndex;
-              const isCurrentChange = changedRowIndices[currentChangeIndex] === virtualRow.index;
+              const item = renderItems[virtualRow.index];
+              if (!item) {
+                return null;
+              }
+
+              if (item.type === "collapsed") {
+                return renderCollapsedRow(item, virtualRow, side);
+              }
+
+              const rowNumber =
+                side === "original" ? item.row.originalIndex : item.row.modifiedIndex;
+              const isCurrentChange = changedRenderIndices[currentChangeIndex] === virtualRow.index;
 
               return (
                 <tr
-                  key={virtualRow.key}
+                  key={`${virtualRow.key}-${side}`}
                   className={cn(
                     "border-b transition-colors",
-                    row.changeType === "added" && "bg-green-50/50 dark:bg-green-900/10",
-                    row.changeType === "removed" && "bg-red-50/50 dark:bg-red-900/10",
-                    row.changeType === "modified" && "bg-yellow-50/30 dark:bg-yellow-900/5",
+                    item.row.changeType === "added" && "bg-green-50/50 dark:bg-green-900/10",
+                    item.row.changeType === "removed" && "bg-red-50/50 dark:bg-red-900/10",
+                    item.row.changeType === "modified" && "bg-yellow-50/30 dark:bg-yellow-900/5",
                     isCurrentChange && "ring-1 ring-inset ring-primary/40 bg-primary/5",
                   )}
                   style={{
@@ -257,9 +344,7 @@ export function SideBySideGrid({
                   >
                     {rowNumber !== null ? rowNumber + 1 : ""}
                   </td>
-                  {visibleColumns.map((colIndex) =>
-                    renderCell(row, colIndex, side, virtualRow.index),
-                  )}
+                  {visibleColumns.map((colIndex) => renderCell(item, colIndex, side))}
                 </tr>
               );
             })}
@@ -269,22 +354,21 @@ export function SideBySideGrid({
     </div>
   );
 
-  if (visibleRows.length === 0) {
+  if (renderItems.length === 0) {
     return (
       <div
-        className={cn("flex items-center justify-center p-12 rounded-xl border bg-card", className)}
+        className={cn("flex items-center justify-center rounded-xl border bg-card p-12", className)}
       >
-        <p className="text-muted-foreground">No differences found</p>
+        <p className="text-muted-foreground">{t("noChanges")}</p>
       </div>
     );
   }
 
   return (
-    <div className={cn("overflow-hidden rounded-xl border bg-card", className)}>
-      <div className="flex">
+    <div className={cn("w-full min-w-0 overflow-hidden rounded-xl border bg-card", className)}>
+      <div className="flex w-full min-w-0">
         {renderTable("original", leftRef)}
-        {/* Central divider */}
-        <div className="relative w-1 bg-border flex-shrink-0">
+        <div className="relative w-1 flex-shrink-0 bg-border">
           <div className="absolute inset-0 bg-gradient-to-b from-red-500/20 via-muted-foreground/20 to-green-500/20" />
         </div>
         {renderTable("modified", rightRef)}
