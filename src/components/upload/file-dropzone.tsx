@@ -3,7 +3,7 @@
 import { FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback } from "react";
-import { useDropzone } from "react-dropzone";
+import { ErrorCode, type FileRejection, useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -20,6 +20,8 @@ interface FileDropzoneProps {
   isLoading: boolean;
   error: string | null;
   onFileSelect: (file: File) => void;
+  onFilePairSelect?: (files: [File, File]) => void;
+  onUploadError?: (message: string) => void;
   onFileClear: () => void;
 }
 
@@ -29,22 +31,46 @@ export function FileDropzone({
   isLoading,
   error,
   onFileSelect,
+  onFilePairSelect,
+  onUploadError,
   onFileClear,
 }: FileDropzoneProps) {
   const t = useTranslations("upload");
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
+      // Support uploading one file or a pair in one action.
+      if (acceptedFiles.length === 2) {
+        const [first, second] = acceptedFiles;
+        if (isFileSupported(first) && isFileSupported(second)) {
+          onFilePairSelect?.([first, second]);
+          return;
+        }
+      }
+
       const selectedFile = acceptedFiles[0];
       if (selectedFile && isFileSupported(selectedFile)) {
         onFileSelect(selectedFile);
       }
     },
-    [onFileSelect],
+    [onFileSelect, onFilePairSelect],
+  );
+
+  const onDropRejected = useCallback(
+    (fileRejections: FileRejection[]) => {
+      const hasTooManyFiles = fileRejections.some((rejection) =>
+        rejection.errors.some((err) => err.code === ErrorCode.TooManyFiles),
+      );
+      if (hasTooManyFiles) {
+        onUploadError?.(t("errors.tooManyFiles"));
+      }
+    },
+    [onUploadError, t],
   );
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: SUPPORTED_MIME_TYPES.reduce(
       (acc, type) => {
         acc[type] = SUPPORTED_EXTENSIONS.map((ext) => ext);
@@ -52,7 +78,8 @@ export function FileDropzone({
       },
       {} as Record<string, string[]>,
     ),
-    maxFiles: 1,
+    // Allow selecting a pair in one action; rejected callback handles >2 with a clear error.
+    maxFiles: 2,
     disabled: isLoading,
   });
 

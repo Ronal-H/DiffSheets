@@ -108,7 +108,7 @@ export function DiffGrid({ diffResult, visibleRows, visibleColumns, className }:
 
   return (
     <div className={cn("overflow-hidden rounded-xl border bg-card", className)}>
-      <div ref={parentRef} className="h-[calc(100vh-220px)] overflow-auto">
+      <div ref={parentRef} className="h-[calc(100vh-180px)] overflow-auto">
         <table
           className="border-collapse text-sm w-full"
           style={{ tableLayout: "fixed", minWidth: `${totalTableWidth}px` }}

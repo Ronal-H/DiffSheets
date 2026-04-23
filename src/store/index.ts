@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { ComparisonOptions, DiffResult, FileUploadState, ParsedSpreadsheet } from "@/types";
+import type {
+  ComparisonOptions,
+  FileUploadState,
+  ParsedSpreadsheet,
+  WorkbookDiffResult,
+} from "@/types";
 import { defaultComparisonOptions } from "@/types";
 
 interface SpreadsheetStore {
@@ -7,8 +12,9 @@ interface SpreadsheetStore {
   originalFile: FileUploadState;
   modifiedFile: FileUploadState;
 
-  // Diff state
-  diffResult: DiffResult | null;
+  // Workbook-level diff state
+  workbookDiffResult: WorkbookDiffResult | null;
+  currentSheetName: string | null;
   isComparing: boolean;
   comparisonError: string | null;
   comparisonVersion: number; // Used for cancellation
@@ -33,7 +39,8 @@ interface SpreadsheetStore {
   setModifiedError: (error: string | null) => void;
 
   // Actions - Diff
-  setDiffResult: (result: DiffResult | null) => void;
+  setWorkbookDiffResult: (result: WorkbookDiffResult | null) => void;
+  setCurrentSheetName: (sheetName: string | null) => void;
   setIsComparing: (comparing: boolean) => void;
   setComparisonError: (error: string | null) => void;
 
@@ -62,7 +69,8 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
   // Initial states
   originalFile: { ...initialFileState },
   modifiedFile: { ...initialFileState },
-  diffResult: null,
+  workbookDiffResult: null,
+  currentSheetName: null,
   isComparing: false,
   comparisonError: null,
   comparisonVersion: 0,
@@ -72,7 +80,8 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
   setOriginalFile: (file) =>
     set((state) => ({
       originalFile: { ...state.originalFile, file },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setOriginalParsed: (parsed) =>
     set((state) => ({
@@ -81,17 +90,20 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
         parsed,
         selectedSheet: parsed?.sheets[0]?.name || "",
       },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setOriginalSheet: (sheet) =>
     set((state) => ({
       originalFile: { ...state.originalFile, selectedSheet: sheet },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setOriginalHeaderRow: (row) =>
     set((state) => ({
       originalFile: { ...state.originalFile, headerRow: row },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setOriginalLoading: (isLoading) =>
     set((state) => ({
@@ -106,7 +118,8 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
   setModifiedFile: (file) =>
     set((state) => ({
       modifiedFile: { ...state.modifiedFile, file },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setModifiedParsed: (parsed) =>
     set((state) => ({
@@ -115,17 +128,20 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
         parsed,
         selectedSheet: parsed?.sheets[0]?.name || "",
       },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setModifiedSheet: (sheet) =>
     set((state) => ({
       modifiedFile: { ...state.modifiedFile, selectedSheet: sheet },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setModifiedHeaderRow: (row) =>
     set((state) => ({
       modifiedFile: { ...state.modifiedFile, headerRow: row },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     })),
   setModifiedLoading: (isLoading) =>
     set((state) => ({
@@ -137,7 +153,8 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
     })),
 
   // Diff actions
-  setDiffResult: (diffResult) => set({ diffResult }),
+  setWorkbookDiffResult: (workbookDiffResult) => set({ workbookDiffResult }),
+  setCurrentSheetName: (currentSheetName) => set({ currentSheetName }),
   setIsComparing: (isComparing) => set({ isComparing }),
   setComparisonError: (comparisonError) => set({ comparisonError }),
 
@@ -152,7 +169,8 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
     set({
       originalFile: { ...initialFileState },
       modifiedFile: { ...initialFileState },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
       isComparing: false,
       comparisonError: null,
       options: { ...defaultComparisonOptions },
@@ -160,31 +178,24 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
   resetOriginal: () =>
     set({
       originalFile: { ...initialFileState },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     }),
   resetModified: () =>
     set({
       modifiedFile: { ...initialFileState },
-      diffResult: null,
+      workbookDiffResult: null,
+      currentSheetName: null,
     }),
 
-  // Recompare with current options (supports cancellation via version check)
+  // Recompare all sheets with current options (supports cancellation via version check)
   recompare: async () => {
     const currentState = useSpreadsheetStore.getState();
-    console.log("[DEBUG] recompare called, options:", {
-      ignoredColumns: currentState.options.ignoredColumns,
-      matchingStrategy: currentState.options.matchingStrategy,
-    });
+    const originalParsed = currentState.originalFile.parsed;
+    const modifiedParsed = currentState.modifiedFile.parsed;
 
-    const origData = currentState.originalFile.parsed?.data.get(
-      currentState.originalFile.selectedSheet,
-    );
-    const modData = currentState.modifiedFile.parsed?.data.get(
-      currentState.modifiedFile.selectedSheet,
-    );
-
-    if (!origData || !modData) {
-      set({ comparisonError: "Missing sheet data" });
+    if (!originalParsed || !modifiedParsed) {
+      set({ comparisonError: "Missing workbook data" });
       return;
     }
 
@@ -193,27 +204,35 @@ export const useSpreadsheetStore = create<SpreadsheetStore>((set) => ({
     set({ isComparing: true, comparisonError: null, comparisonVersion: newVersion });
 
     try {
-      const { computeSpreadsheetDiff } = await import("@/lib/diff");
+      const { computeWorkbookDiff } = await import("@/lib/diff/workbook-diff");
 
-      // Use setTimeout to yield to main thread before heavy computation
+      // Yield to main thread before heavy workbook processing to keep UI responsive.
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       const optionsForCompare = useSpreadsheetStore.getState().options;
-      console.log("[DEBUG] computeSpreadsheetDiff with options:", {
-        ignoredColumns: optionsForCompare.ignoredColumns,
-      });
-
-      const result = await computeSpreadsheetDiff(
-        origData,
-        modData,
+      const workbookResult = await computeWorkbookDiff(
+        originalParsed,
+        modifiedParsed,
         optionsForCompare,
       );
 
       // Check if this comparison is still current (not cancelled)
       const latestState = useSpreadsheetStore.getState();
       if (latestState.comparisonVersion === newVersion) {
-        console.log("[DEBUG] diff result summary:", result.summary);
-        set({ diffResult: result, isComparing: false });
+        const hasCurrentSheet = workbookResult.sheets.some(
+          (sheet) => sheet.sheetName === latestState.currentSheetName,
+        );
+        const nextSheetName = hasCurrentSheet
+          ? latestState.currentSheetName
+          : (workbookResult.sheets[0]?.sheetName ?? null);
+
+        set({
+          workbookDiffResult: workbookResult,
+          currentSheetName: nextSheetName,
+          isComparing: false,
+          comparisonError:
+            workbookResult.sheets.length > 0 ? null : "No sheets available for comparison",
+        });
       }
       // If version doesn't match, another comparison started - don't update state
     } catch (error) {

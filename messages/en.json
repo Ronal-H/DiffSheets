@@ -55,7 +55,10 @@
     "findDifference": "Find Difference",
     "processing": "Processing...",
     "fileInfo": "{rows} rows, {cols} columns",
-    "clear": "Clear file"
+    "clear": "Clear file",
+    "errors": {
+      "tooManyFiles": "Please upload at most 2 files at once."
+    }
   },
   "diff": {
     "title": "Comparison Results",
@@ -76,6 +79,32 @@
       "hideUnchangedCols": "Hide unchanged columns",
       "ignoreWhitespace": "Ignore whitespace",
       "ignoreCase": "Ignore case"
+    },
+    "activeSheet": "Sheet: {name}",
+    "displayLabel": "Display",
+    "comparisonLabel": "Comparison",
+    "collapsed": {
+      "expand": "Show {count} unchanged rows",
+      "collapse": "Hide {count} unchanged rows"
+    },
+    "sheetSidebar": {
+      "title": "Sheets",
+      "sheetCount": "{count} sheet(s)",
+      "modifiedCount": "{count} modified",
+      "unchangedCount": "{count} unchanged",
+      "addedCount": "{count} added",
+      "removedCount": "{count} removed",
+      "deltaRows": "{count} row changes",
+      "status": {
+        "unchanged": "Unchanged",
+        "modified": "Modified",
+        "added": "Added",
+        "removed": "Removed"
+      }
+    },
+    "actions": {
+      "replaceOriginal": "Replace A",
+      "replaceModified": "Replace B"
     },
     "noChanges": "No differences found",
     "emptyState": "Upload two files to compare",
